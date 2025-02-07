@@ -1,3 +1,0 @@
-/root/cg_labs/lab1/build/CMakeFiles/cg_labs_1.dir
-/root/cg_labs/lab1/build/CMakeFiles/edit_cache.dir
-/root/cg_labs/lab1/build/CMakeFiles/rebuild_cache.dir
