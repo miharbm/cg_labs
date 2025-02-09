@@ -9,6 +9,7 @@ enum IntersectType {SAME, PARALLEL, SKEW, SKEW_CROSS, SKEW_NO_CROSS};
 enum EType {TOUCHING, CROSS_LEFT, CROSS_RIGHT, INESSENTIAL};
 enum PType {INSIDE, OUTSIDE};
 enum fillType {EO, NZW};
+enum polygonOrientation {CW, CCW};
 
 CLPointType classify(Point p1, Point p2, Point p) {
     double ax = p2.x - p1.x;
@@ -50,6 +51,19 @@ EType getEdgeType(Point o, Point d, Point a) {
             return INESSENTIAL;
     }
 }
+
+
+polygonOrientation getPolygonOrientation(vector<Point> points) {
+    int n = points.size();
+    int sum = 0;
+
+    for (int i = 0; i < n; ++i) {
+        sum += (points[(i + 1) % n].x - points[i].x) * (points[(i + 1) % n].y + points[i].y);
+    }
+
+    return (sum > 0) ? CW : CCW;
+}
+
 
 PType PInPolygonEOMode(Point p, const vector<Point>& points) {
     int n = points.size();
@@ -296,6 +310,8 @@ int main(int argc, char** argv) {
         cin >> x >> y;
         points.push_back(Point(x, y));
     }
+
+    cout << (getPolygonOrientation(points) == CW ? "CW" : "CCW")  << endl;
 
     drawPolygon(img1, points);
     drawPolygon(img2, points);
