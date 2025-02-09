@@ -20,7 +20,7 @@ Mat floydSteinberg(Mat &image, int levels) {
     Mat outputImage = image.clone();
 
     for (int i = 0; i < image.rows; ++i) {
-        if (i % 2 == 0) {
+        if ((i & 1) == 0) {
             for (int j = 0; j < image.cols; ++j) {
                 int oldPixel = outputImage.at<uchar>(i, j);
                 int newPixel = getClosestLevel(oldPixel, levels);  
@@ -78,7 +78,6 @@ int main(int argc, char** argv) {
     int n;
     cin >> n;
 
-
     if (n < 1 || n > 8) {
         cout << "Invalid value" << endl;
         return -1;
@@ -89,7 +88,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    Mat outputImage = floydSteinberg(image, static_cast<int>(pow(2, n)));
+    Mat outputImage = floydSteinberg(image, 1 << n);
 
     imwrite("../out/result.png", outputImage);
     
