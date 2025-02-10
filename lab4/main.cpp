@@ -5,6 +5,7 @@ using namespace std;
 using namespace cv;
 
 enum CLPointType {LEFT, RIGHT, BEYOND, BEHIND, BETWEEN, ORIGIN, DESTINATION};
+enum polygonOrientation {CW, CCW};
 
 CLPointType classify(Point p1, Point p2, Point p) {
     double ax = p2.x - p1.x;
@@ -82,8 +83,27 @@ void drawLine(Mat &img, Point p1, Point p2) {
     }
 }
 
-Point getCubicBezierCurvePoint(Point p0, Point p1, Point p2, Point p3, double t)
-{
+polygonOrientation getPolygonOrientation(vector<Point> points) {
+    int n = points.size();
+    int sum = 0;
+
+    for (int i = 0; i < n; ++i) {
+        sum += (points[(i + 1) % n].x - points[i].x) * (points[(i + 1) % n].y + points[i].y);
+    }
+
+    return (sum > 0) ? CW : CCW;
+}
+
+vector<Point> reorientPolygon(vector<Point> points) {
+    vector<Point> newPolygon;
+    newPolygon.push_back(points[0]);
+    for (int i = points.size() - 1; i >= 1; --i) {
+        newPolygon.push_back(points[i]);
+    }
+    return newPolygon;
+}
+
+Point getCubicBezierCurvePoint(Point p0, Point p1, Point p2, Point p3, double t) {
     double B0 = (1 - t) * (1 - t) * (1 - t);
     double B1 = 3 * t * (1 - t) * (1 - t);
     double B2 = 3 * t * t * (1 - t);
@@ -93,18 +113,19 @@ Point getCubicBezierCurvePoint(Point p0, Point p1, Point p2, Point p3, double t)
     return Point(x, y);
 }
 
-void drawCubicBezierCurve(Mat &img, Point p0, Point p1, Point p2, Point p3, int N)
-{
+void drawCubicBezierCurve(Mat &img, Point p0, Point p1, Point p2, Point p3, int N) {
     double step = 1.0 / (N - 1);
-    for (int i = 0; i < N; ++i)
-    {
+    for (int i = 0; i < N; ++i) {
         Point p = getCubicBezierCurvePoint(p0, p1, p2, p3, i * step);
         Point q = getCubicBezierCurvePoint(p0, p1, p2, p3, (i + 1) * step);
         drawLine(img, p, q);
     }
+    drawLine(img, p0, p1);
+    drawLine(img, p1, p2);
+    drawLine(img, p2, p3);
 }
 
-int CyrusBeckClipLine(Point& p1, Point& p2, std::vector<Point> points) {
+int CyrusBeckClipLine(Point& p1, Point& p2, vector<Point> points) {
     int n = points.size();
     Point new_p1, new_p2;
     double t1 = 0, t2 = 1, t;
@@ -147,35 +168,48 @@ int CyrusBeckClipLine(Point& p1, Point& p2, std::vector<Point> points) {
     return 0;
 }
 
-void drawPolygon(Mat& img, std::vector<Point>& points) {
+void drawPolygon(Mat& img, vector<Point>& points) {
     for (int i = 0; i < points.size(); ++i) {
         drawLine(img, points[i], points[(i + 1) % points.size()]);
     }
 }
 
-void clipLine(Mat &img, Point p1, Point p2, std::vector<Point> points) {
+void clipLine(Mat &img, Point p1, Point p2, vector<Point> points) {
     Point point1 = p1, point2 = p2;
+    if (getPolygonOrientation(points) == CCW) {
+        points = reorientPolygon(points);
+    }
     if (CyrusBeckClipLine(point1, point2, points)) {
         drawLine(img, point1, point2);
     }
     else {
-        std::cout << "Line can't be clipped";
+        cout << "Line can't be clipped";
     }
 }
 
 int main() {
     Mat img(500, 500, CV_8UC3, Scalar(255, 255, 255));
     int n;
-    std::cin >> n;
-    std::vector<Point> points;
+    cin >> n;
+    vector<Point> points;
     for (int i = 0; i < n; ++i) {
         int x, y;
-        std::cin >> x >> y;
+        cin >> x >> y;
         points.push_back(Point(x, y));
     }
-    // drawCubicBezierCurve(img, Point(0, 0), Point(400, 20), Point(0, 100), Point(400, 400), 1000);
-    drawPolygon(img, points);
-    clipLine(img, Point(220, 320), Point(320, 220), points);
-    imwrite("../out/clipped_line.jpg", img);
+    vector<pair<Point, Point>> lines = {{Point(220, 320), Point(320, 220)}, {Point(210, 210), Point(290, 290)}, {Point(190, 190), Point(150, 150)}};
+    for (int i = 0; i < lines.size(); ++i) {
+        drawPolygon(img, points);
+        drawLine(img, lines[i].first, lines[i].second);
+        imwrite("../out/before_clipping" + to_string(i) + ".jpg", img);
+        img.setTo(Scalar(255, 255, 255));
+        drawPolygon(img, points);
+        clipLine(img, lines[i].first, lines[i].second, points);
+        imwrite("../out/clipped_line" + to_string(i) + ".jpg", img);
+        img.setTo(Scalar(255, 255, 255));
+    }
+    drawCubicBezierCurve(img, Point(0, 0), Point(400, 20), Point(400, 100), Point(0, 400), 1000);
+    imwrite("../out/curve_bezier.jpg", img);
+
     return 0;
 }
