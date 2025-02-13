@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.12)
+project( cg_hw_3 )
+find_package( OpenCV REQUIRED )
+add_executable( cg_hw_3  main.cpp )
+target_link_libraries( cg_hw_3 ${OpenCV_LIBS} )

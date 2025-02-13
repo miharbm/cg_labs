@@ -124,6 +124,64 @@ bool isFrontFace(Point3d normal, Point3d viewDirection) {
 //     }
 // }
 
+Vec3b getVertexColor(Point3d normal, Point3d lightDir, Vec3b baseColor) {
+    double intensity = max(0.0, (normal.x * lightDir.x + normal.y * lightDir.y + normal.z * lightDir.z));
+    Vec3b color;
+    for (int i = 0; i < 3; ++i) {
+        color[i] = uchar(baseColor[i] * intensity);
+    }
+    return color;
+}
+
+void drawTriangleGouraud(Mat& img, vector<Point3d> points, vector<Vec3b> colors, Point2d center) {
+    Point2d imgCenter(int(round(img.cols / 2)), int(round(img.rows / 2)));
+    for (auto& p : points) {
+        p.x += imgCenter.x - center.x;
+        p.y += imgCenter.y - center.y;
+    }
+
+    // Сортировка по y
+    if (points[1].y < points[0].y) swap(points[0], points[1]);
+    if (points[2].y < points[1].y) swap(points[1], points[2]);
+    if (points[1].y < points[0].y) swap(points[0], points[1]);
+
+    // Интерполяция по высоте для получения цвета по каждому пикселю
+    for (int y = points[0].y; y <= points[2].y; ++y) {
+        if (y < 0 || y >= img.rows) continue;
+        
+        // Вычисление границ строки
+        double t = (y - points[0].y) / (points[2].y - points[0].y + 1e-6);
+        Point2d left = Point2d((points[0] + t * (points[2] - points[0])).x, (points[0] + t * (points[2] - points[0])).y);
+        Vec3b leftColor = colors[0] + t * (colors[2] - colors[0]);
+
+        Point2d right;
+        Vec3b rightColor;
+        if (y < points[1].y) {
+            double t1 = (y - points[0].y) / (points[1].y - points[0].y + 1e-6);
+            right = Point2d((points[0] + t1 * (points[1] - points[0])).x, (points[0] + t1 * (points[1] - points[0])).y);
+            rightColor = colors[0] + t1 * (colors[1] - colors[0]);
+        } else {
+            double t2 = (y - points[1].y) / (points[2].y - points[1].y + 1e-6);
+            right = Point2d((points[1] + t2 * (points[2] - points[1])).x, (points[1] + t2 * (points[2] - points[1])).y);
+            rightColor = colors[1] + t2 * (colors[2] - colors[1]);
+        }
+
+        if (right.x < left.x) {
+            swap(left, right);
+            swap(leftColor, rightColor);
+        }
+
+        // Интерполяция цвета по строке
+        for (int x = left.x; x <= right.x; ++x) {
+            if (x < 0 || x >= img.cols) continue;
+            double tx = (x - left.x) / (right.x - left.x + 1e-6);
+            Vec3b color = leftColor + tx * (rightColor - leftColor);
+            img.at<Vec3b>(img.rows - y, x) = color;
+        }
+    }
+}
+
+
 void drawCubePerspective(Mat& img, vector<Point3d> transoformedPoints, Point2d center) {
     img.setTo(Scalar(255, 255, 255));
     vector<vector<int>> faces = {
@@ -155,6 +213,47 @@ void drawCubePerspective(Mat& img, vector<Point3d> transoformedPoints, Point2d c
         }
     }
 }
+
+void drawCubeGouraud(Mat& img, vector<Point3d> points, Point3d lightDir, Point2d center) {
+    vector<vector<int>> faces = {
+        {0, 1, 2, 3}, // Нижняя грань
+        {7, 6, 5, 4}, // Верхняя грань
+        {4, 5, 1, 0}, // Передняя грань
+        {5, 6, 2, 1}, // Правая грань
+        {6, 7, 3, 2}, // Задняя грань
+        {7, 4, 0, 3}  // Левая грань
+    };
+
+    Point3d viewDir(0, 0, -1);
+    Vec3b baseColor(100, 100, 255);
+
+    for (const auto& face : faces) {
+        Point3d normal = getNormal(
+            points[face[0]],
+            points[face[1]],
+            points[face[2]]
+        );
+
+        if (!isFrontFace(normal, viewDir)) {
+            continue;
+        }
+
+        // Вычисление цвета для каждой вершины
+        vector<Vec3b> colors;
+        for (int i = 0; i < 4; ++i) {
+            colors.push_back(getVertexColor(normal, lightDir, baseColor));
+        }
+
+        vector<Point3d> facePoints;
+        for (int i = 0; i < 4; ++i) {
+            facePoints.push_back(points[face[i]]);
+        }
+
+        // Закрашиваем грань методом Гуро
+        drawTriangleGouraud(img, facePoints, colors, center);
+    }
+}
+
 
 void drawCubeParallel(Mat& img, vector<Point2d> newPoints, vector<Point3d> originalPoints, Point2d center) {
     img.setTo(Scalar(255, 255, 255));
@@ -221,6 +320,23 @@ void getParallelProjection(Mat& img, vector<Point3d> points) {
     // return newPoints;
 }
 
+void getParallelProjectionGouraud(Mat& img, vector<Point3d> points) {
+    vector<Point2d> newPoints;
+    int n = points.size();
+    for (int i = 0; i < n; ++i) {
+        Point2d newPoint = transformParallel(points[i]);
+        newPoints.push_back(newPoint);
+    }
+    Point2d center(0, 0);
+    for (int i = 0; i < newPoints.size(); ++i) {
+        center.x += newPoints[i].x;
+        center.y += newPoints[i].y;
+    }
+    center = Point2d(int(round(center.x / newPoints.size())), int(round(center.y / newPoints.size())));
+    drawCubeGouraud(img, points, Point3d(0, 0, -1), center);
+    // return newPoints;
+}
+
 void animatePerspective(Mat& img, vector<Point3d> points, Point3d normal, int numFrames, int k) {
     double norm = sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
     normal.x = int(round(double(normal.x) / norm));
@@ -247,6 +363,19 @@ void animateParallel(Mat& img, vector<Point3d> points, Point3d normal, int numFr
     }
 }
 
+void animateGouraud(Mat& img, vector<Point3d> points, Point3d normal, int numFrames) {
+    double norm = sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+    normal.x = int(round(double(normal.x) / norm));
+    normal.y = int(round(double(normal.y) / norm));
+    normal.z = int(round(double(normal.z) / norm));
+    for (int i = 0; i < numFrames; ++i) {
+        getParallelProjectionGouraud(img, points);
+        string fileName = "../frames/frame" + to_string(i) + ".jpg";
+        imwrite(fileName, img);
+        points = makeRotation(points, normal, 6);
+    }
+}
+
 int main() {
     Mat img(1440, 2560, CV_8UC3, Scalar(255, 255, 255));
 
@@ -262,7 +391,8 @@ int main() {
     
     Point3d normal(1, 0, 0);
     // animatePerspective(img, points, normal, 120, 400);
-    animateParallel(img, points, normal, 120);
+    // animateParallel(img, points, normal, 120);
+    animateGouraud(img, points, normal, 120);
     
     return 0;
 }
