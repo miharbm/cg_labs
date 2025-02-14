@@ -141,9 +141,13 @@ void drawTriangleGouraud(Mat& img, vector<Point3d> points, vector<Vec3b> colors,
     }
 
     // Сортировка по y
-    if (points[1].y < points[0].y) swap(points[0], points[1]);
-    if (points[2].y < points[1].y) swap(points[1], points[2]);
-    if (points[1].y < points[0].y) swap(points[0], points[1]);
+    // if (points[1].y < points[0].y) swap(points[0], points[1]);
+    // if (points[2].y < points[1].y) swap(points[1], points[2]);
+    // if (points[1].y < points[0].y) swap(points[0], points[1]);
+
+    sort(points.begin(), points.end(), [](const Point3d &a, const Point3d &b) {
+        return a.y < b.y;
+    });
 
     // Интерполяция по высоте для получения цвета по каждому пикселю
     for (int y = points[0].y; y <= points[2].y; ++y) {
