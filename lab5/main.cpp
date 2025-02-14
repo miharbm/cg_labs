@@ -7,18 +7,17 @@
 using namespace std;
 using namespace cv;
 
-vector<Point3d> makeRotation(vector<Point3d> points, Point3d normal, int angle) {
-    vector<Point3d> newPoints;
-    for (int i = 0; i < points.size(); ++i) {
-        double cosphi = cos(double(angle) * M_PI / 180);
-        double sinphi = sin(double(angle) * M_PI / 180);
-        Point3d newPoint;
-        newPoint.x = points[i].x * (normal.x * normal.x * (1 - cosphi) + cosphi) + points[i].y * (normal.x * normal.y * (1 - cosphi) - normal.z * sinphi) + points[i].z * (normal.x * normal.z * (1 - cosphi) + normal.y * sinphi);
-        newPoint.y = points[i].x * (normal.x * normal.y * (1 - cosphi) + normal.z * sinphi) + points[i].y * (normal.y * normal.y * (1 - cosphi) + cosphi) + points[i].z * (normal.y * normal.z * (1 - cosphi) - normal.x * sinphi);
-        newPoint.z = points[i].x * (normal.x * normal.z * (1 - cosphi) - normal.y * sinphi) + points[i].y * (normal.y * normal.z * (1 - cosphi) + normal.x * sinphi) + points[i].z * (normal.z * normal.z * (1 - cosphi) + cosphi);
-        newPoints.push_back(newPoint);
+std::vector<cv::Point3d> makeRotation(std::vector<cv::Point3d> points, cv::Point3d rotationNormalLine, int angle) {
+    double phi = angle * CV_PI / 180;
+    std::vector<cv::Point3d> rotatedPoints;
+    for (int i = 0; i < points.size(); i++) {
+        cv::Point3d newPoint;
+        newPoint.x = points[i].x * (rotationNormalLine.x * rotationNormalLine.x * (1 - std::cos(phi)) + std::cos(phi)) + points[i].y * (rotationNormalLine.x * rotationNormalLine.y * (1 - std::cos(phi)) - rotationNormalLine.z * std::sin(phi)) + points[i].z * (rotationNormalLine.x * rotationNormalLine.z * (1 - std::cos(phi)) + rotationNormalLine.y * std::sin(phi));
+        newPoint.y = points[i].x * (rotationNormalLine.x * rotationNormalLine.y * (1 - std::cos(phi)) + rotationNormalLine.z * std::sin(phi)) + points[i].y * (rotationNormalLine.y * rotationNormalLine.y * (1 - std::cos(phi)) + std::cos(phi)) + points[i].z * (rotationNormalLine.y * rotationNormalLine.z * (1 - std::cos(phi)) - rotationNormalLine.x * std::sin(phi));
+        newPoint.z = points[i].x * (rotationNormalLine.x * rotationNormalLine.z * (1 - std::cos(phi)) - rotationNormalLine.y * std::sin(phi)) + points[i].y * (rotationNormalLine.y * rotationNormalLine.z * (1 - std::cos(phi)) + rotationNormalLine.x * std::sin(phi)) + points[i].z * (rotationNormalLine.z * rotationNormalLine.z * (1 - std::cos(phi)) + std::cos(phi));
+        rotatedPoints.push_back(cv::Point3d(newPoint.x, newPoint.y, newPoint.z));
     }
-    return newPoints;
+    return rotatedPoints;
 }
 
 void drawLine(Mat& img, Point2d p1, Point2d p2, Point2d figureCenter) {
@@ -50,7 +49,6 @@ void drawLine(Mat& img, Point2d p1, Point2d p2, Point2d figureCenter) {
                 img.at<Vec3b>(img.rows - y, x) = Vec3b(0, 0, 0);
                 if (error > 0) {
                     y += iy;
-                    error -= 2 * dx;
                 }
                 x += ix;
                 error += 2 * dy;
@@ -84,8 +82,77 @@ void drawLine(Mat& img, Point2d p1, Point2d p2, Point2d figureCenter) {
     }
 }
 
-Point3f transformPerspective(Point3d p, double r) {
-    Point3f transformedPoint(
+enum CLPointType {LEFT, RIGHT, BEYOND, BEHIND, BETWEEN, ORIGIN, DESTINATION};
+enum IntersectType {SAME, PARALLEL, SKEW, SKEW_CROSS, SKEW_NO_CROSS};
+enum EType {TOUCHING, CROSS_LEFT, CROSS_RIGHT, INESSENTIAL};
+enum PType {INSIDE, OUTSIDE};
+enum fillType {EO, NZW};
+enum polygonOrientation {CW, CCW};
+
+CLPointType classify(Point2d p1, Point2d p2, Point2d p) {
+    double ax = p2.x - p1.x;
+    double ay = p2.y - p1.y;
+    double bx = p.x - p1.x;
+    double by = p.y - p1.y;
+    double s = ax * by - bx * ay;
+    
+    if (s > 0) return LEFT;
+    if (s < 0) return RIGHT;
+    if ((ax * bx < 0) || (ay * by < 0)) return BEHIND;
+    if ((ax * ax + ay * ay) < (bx * bx + by * by)) return BEYOND;
+    if (p1.x == p.x && p1.y == p.y) return ORIGIN;
+    if (p2.x == p.x && p2.y == p.y) return DESTINATION;
+    return BETWEEN;
+}
+
+EType getEdgeType(Point2d o, Point2d d, Point2d a) {
+    switch(classify(o, d, a)) {
+        case LEFT:
+            if (a.y > o.y && a.y <= d.y) {
+                return CROSS_LEFT;
+            }
+            else {
+                return INESSENTIAL;
+            }
+        case RIGHT:
+            if (a.y > d.y && a.y <= o.y) {
+                return CROSS_RIGHT;
+            }
+            else {
+                return INESSENTIAL;
+            }
+        case BETWEEN:
+        case ORIGIN:
+        case DESTINATION:
+            return TOUCHING;
+        default:
+            return INESSENTIAL;
+    }
+}
+
+
+PType PInPolygonEOMode(Point2d p, const vector<Point2d>& points) {
+    int n = points.size();
+    int param = 0;
+    for (int i = 0; i < n; ++i) {
+        switch(getEdgeType(points[i], points[(i + 1) % n], p)) {
+            case TOUCHING:
+                return INSIDE;
+            case CROSS_LEFT:
+            case CROSS_RIGHT:
+                param = 1 - param;
+        }
+    }
+    if (param == 1) {
+        return INSIDE;
+    } 
+    else {
+        return OUTSIDE;
+    }
+}
+
+Point3d transformPerspective(Point3d p, double r) {
+    Point3d transformedPoint(
         double(p.x) / (r * p.z + 1.0),
         double(p.y) / (r * p.z + 1.0), 
         double(p.z) / (r * p.z + 1.0)
@@ -95,6 +162,10 @@ Point3f transformPerspective(Point3d p, double r) {
 
 Point2d transformParallel(Point3d p) {
     return Point2d(p.x, p.y);
+}
+
+double dot(Point3d p1, Point3d p2) {
+    return p1.x * p2.x + p1.y * p2.y + p1.z * p2.z;
 }
 
 Point3d getNormal(Point3d p1, Point3d p2, Point3d p3) {
@@ -124,77 +195,15 @@ bool isFrontFace(Point3d normal, Point3d viewDirection) {
 //     }
 // }
 
-Vec3b getVertexColor(Point3d normal, Point3d lightDir, Vec3b baseColor) {
-    double intensity = max(0.0, (normal.x * lightDir.x + normal.y * lightDir.y + normal.z * lightDir.z));
-    Vec3b color;
-    for (int i = 0; i < 3; ++i) {
-        color[i] = uchar(baseColor[i] * intensity);
-    }
-    return color;
-}
-
-void drawTriangleGouraud(Mat& img, vector<Point3d> points, vector<Vec3b> colors, Point2d center) {
-    Point2d imgCenter(int(round(img.cols / 2)), int(round(img.rows / 2)));
-    for (auto& p : points) {
-        p.x += imgCenter.x - center.x;
-        p.y += imgCenter.y - center.y;
-    }
-
-    // Сортировка по y
-    // if (points[1].y < points[0].y) swap(points[0], points[1]);
-    // if (points[2].y < points[1].y) swap(points[1], points[2]);
-    // if (points[1].y < points[0].y) swap(points[0], points[1]);
-
-    sort(points.begin(), points.end(), [](const Point3d &a, const Point3d &b) {
-        return a.y < b.y;
-    });
-
-    // Интерполяция по высоте для получения цвета по каждому пикселю
-    for (int y = points[0].y; y <= points[2].y; ++y) {
-        if (y < 0 || y >= img.rows) continue;
-        
-        // Вычисление границ строки
-        double t = (y - points[0].y) / (points[2].y - points[0].y + 1e-6);
-        Point2d left = Point2d((points[0] + t * (points[2] - points[0])).x, (points[0] + t * (points[2] - points[0])).y);
-        Vec3b leftColor = colors[0] + t * (colors[2] - colors[0]);
-
-        Point2d right;
-        Vec3b rightColor;
-        if (y < points[1].y) {
-            double t1 = (y - points[0].y) / (points[1].y - points[0].y + 1e-6);
-            right = Point2d((points[0] + t1 * (points[1] - points[0])).x, (points[0] + t1 * (points[1] - points[0])).y);
-            rightColor = colors[0] + t1 * (colors[1] - colors[0]);
-        } else {
-            double t2 = (y - points[1].y) / (points[2].y - points[1].y + 1e-6);
-            right = Point2d((points[1] + t2 * (points[2] - points[1])).x, (points[1] + t2 * (points[2] - points[1])).y);
-            rightColor = colors[1] + t2 * (colors[2] - colors[1]);
-        }
-
-        if (right.x < left.x) {
-            swap(left, right);
-            swap(leftColor, rightColor);
-        }
-
-        // Интерполяция цвета по строке
-        for (int x = left.x; x <= right.x; ++x) {
-            if (x < 0 || x >= img.cols) continue;
-            double tx = (x - left.x) / (right.x - left.x + 1e-6);
-            Vec3b color = leftColor + tx * (rightColor - leftColor);
-            img.at<Vec3b>(img.rows - y, x) = color;
-        }
-    }
-}
-
-
 void drawCubePerspective(Mat& img, vector<Point3d> transoformedPoints, Point2d center) {
     img.setTo(Scalar(255, 255, 255));
     vector<vector<int>> faces = {
         {0, 1, 2, 3}, // Нижняя грань
         {7, 6, 5, 4}, // Верхняя грань
-        {4, 5, 1, 0}, // Передняя грань
-        {5, 6, 2, 1}, // Правая грань
-        {6, 7, 3, 2}, // Задняя грань
-        {7, 4, 0, 3}  // Левая грань
+        {3, 7, 4, 0}, // Передняя грань
+        {7, 3, 2, 6}, // Правая грань
+        {5, 6, 2, 1}, // Задняя грань
+        {0, 4, 5, 1}  // Левая грань
     };
 
     Point3d viewDir(0, 0, -1);
@@ -218,48 +227,7 @@ void drawCubePerspective(Mat& img, vector<Point3d> transoformedPoints, Point2d c
     }
 }
 
-void drawCubeGouraud(Mat& img, vector<Point3d> points, Point3d lightDir, Point2d center) {
-    vector<vector<int>> faces = {
-        {0, 1, 2, 3}, // Нижняя грань
-        {7, 6, 5, 4}, // Верхняя грань
-        {4, 5, 1, 0}, // Передняя грань
-        {5, 6, 2, 1}, // Правая грань
-        {6, 7, 3, 2}, // Задняя грань
-        {7, 4, 0, 3}  // Левая грань
-    };
-
-    Point3d viewDir(0, 0, -1);
-    Vec3b baseColor(100, 100, 255);
-
-    for (const auto& face : faces) {
-        Point3d normal = getNormal(
-            points[face[0]],
-            points[face[1]],
-            points[face[2]]
-        );
-
-        if (!isFrontFace(normal, viewDir)) {
-            continue;
-        }
-
-        // Вычисление цвета для каждой вершины
-        vector<Vec3b> colors;
-        for (int i = 0; i < 4; ++i) {
-            colors.push_back(getVertexColor(normal, lightDir, baseColor));
-        }
-
-        vector<Point3d> facePoints;
-        for (int i = 0; i < 4; ++i) {
-            facePoints.push_back(points[face[i]]);
-        }
-
-        // Закрашиваем грань методом Гуро
-        drawTriangleGouraud(img, facePoints, colors, center);
-    }
-}
-
-
-void drawCubeParallel(Mat& img, vector<Point2d> newPoints, vector<Point3d> originalPoints, Point2d center) {
+void drawCubeParallel(Mat& img, vector<Point2d> newPoints, vector<Point3d> originalPoints, Point2d center) { 
     img.setTo(Scalar(255, 255, 255));
     vector<vector<int>> faces = {
         {0, 1, 2, 3}, // Нижняя грань
@@ -287,6 +255,167 @@ void drawCubeParallel(Mat& img, vector<Point2d> newPoints, vector<Point3d> origi
         for (int i = 0; i < face.size(); ++i) {
             drawLine(img, newPoints[face[i]], newPoints[face[(i + 1) % face.size()]], center);
         }
+    }
+}
+
+Point3d normalize(Point3d vector){
+    double length = 0;
+    Point3d result;
+    length = vector.x * vector.x + vector.y * vector.y + vector.z * vector.z;
+    length = sqrt(length);
+    result.x = vector.x / length;
+    result.y = vector.y / length;
+    result.z = vector.z / length;
+    return result;
+}
+
+Point3d calculateNormalForVertex(Point3d vertex, vector<Point3d> points, vector<vector<int>> faces) {
+    Point3d sumNormals = {0, 0, 0};
+    int count = 0;
+
+    for (auto face : faces) {
+        for (int i = 0; i < face.size(); ++i) {
+            if (points[face[i]] == vertex) {
+                Point3d normal = getNormal(points[face[0]], points[face[1]], points[face[2]]);
+                sumNormals.x += normal.x;
+                sumNormals.y += normal.y;
+                sumNormals.z += normal.z;
+                count++;
+                break;
+            }
+        }
+    }
+
+    sumNormals.x /= count;
+    sumNormals.y /= count;
+    sumNormals.z /= count;
+    double length = sqrt(sumNormals.x * sumNormals.x + sumNormals.y * sumNormals.y + sumNormals.z * sumNormals.z);
+    sumNormals.x /= -length; // тут заодно умножим на минус 1, чтобы получить внешнюю нормаль
+    sumNormals.y /= -length;
+    sumNormals.z /= -length;
+    return sumNormals;
+}
+
+double getVertexFongIntensity(double Ia, double Ip, double kd, double ks, double n, 
+                                    Point3d lightSource, Point3d viewDir, Point3d vertex, vector<Point3d> points, vector<vector<int>> faces){
+    Point3d N = calculateNormalForVertex(vertex, points, faces);
+    Point3d light = {lightSource.x - vertex.x, lightSource.y - vertex.y, lightSource.z - vertex.z};
+    light = normalize(light);
+    Point3d R = {2 * dot(N, light) * N.x - light.x, 2 * dot(N, light) * N.y - light.y, 2 * dot(N, light) * N.y - light.y};
+    R = normalize(R);
+    return Ia + Ip * kd * dot(N, light) + ks * pow(dot(normalize(viewDir), R), n);
+}
+
+double interpolate(double x, double left, double right, double leftIntensity, double rightIntensity) {
+    return leftIntensity + (rightIntensity - leftIntensity) * (x - left) / (right - left);
+}
+
+pair<vector<double>, vector<double>> getIntersectionsShading(int y, vector<Point2d> points, vector<double> I) {
+    int n = points.size();
+    vector<double> intersections;
+    vector<double> intensities;
+    for (int i = 0; i < n; ++i) {
+        double x1 = points[i].x;
+        double y1 = points[i].y;
+        double x2 = points[(i + 1) % n].x;
+        double y2 = points[(i + 1) % n].y;
+        if (y1 != y2) {
+            double x = x1 + (y - y1) * (x2 - x1) / (y2 - y1);
+            double intensity = I[i] + (I[(i + 1) % n] - I[i]) * (y - y1) / (y2 - y1);
+            intersections.push_back(x);
+            intensities.push_back(intensity); 
+        }
+    }
+    return {intersections, intensities};
+}
+
+double getIntensity(int x, int y, vector<Point2d> points, vector<double> I) {
+    pair<vector<double>, vector<double>> intersectResult = getIntersectionsShading(y, points, I);
+    vector<double> intersections = intersectResult.first;
+    vector<double> intensities = intersectResult.second;
+
+    vector<pair<int, size_t>> indexed_vector;
+    for (size_t i = 0; i < intersections.size(); ++i) {
+        indexed_vector.emplace_back(intersections[i], i);
+    }
+
+    sort(indexed_vector.begin(), indexed_vector.end());
+
+    vector<double> sorted_intersections;
+    vector<double> sorted_intensities;
+    vector<char> sorted_v2;
+    for (const auto& [value, index] : indexed_vector) {
+        sorted_intersections.push_back(value);
+        sorted_intensities.push_back(intensities[index]);
+    }
+
+    for (int i = 0; i < sorted_intersections.size() - 1; ++i) {
+        if (x >= sorted_intersections[i] && x <= sorted_intersections[i + 1]) {
+            return interpolate(x, sorted_intersections[i], sorted_intersections[i + 1], 
+                sorted_intensities[i], sorted_intensities[i + 1]);
+        }
+    }
+    return 0;
+}
+
+void fillProjectedFace(Mat& img, vector<Point2d> points, vector<double> I, Point2d figureCenter) {
+    Point2d imgCenter(int(round(img.cols / 2)), int(round(img.rows / 2)));
+    int xMin = 1000, yMin = 1000, xMax = -1, yMax = -1;
+    for (int i = 0; i < points.size(); ++i) {
+        if (points[i].x < xMin) xMin = points[i].x;
+        if (points[i].y < yMin) yMin = points[i].y;
+        if (points[i].x > xMax) xMax = points[i].x;
+        if (points[i].y > yMax) yMax = points[i].y;
+    }
+    for (int y = yMin; y <= yMax; ++y) {
+        for (int x = xMin; x <= xMax; ++x) {
+            if (PInPolygonEOMode(Point(x, y), points) == INSIDE) {
+                double intensity = getIntensity(x, y, points, I);
+                int clampedIntensity = max(0, min(255, int(round(intensity * 255))));
+                img.at<uchar>(img.rows - (y + imgCenter.y - figureCenter.y), x + imgCenter.x - figureCenter.x) = static_cast<uchar>(clampedIntensity);
+            }
+        }
+    }
+}
+
+void drawCubeParallelWithShading(Mat& img, vector<Point2d> newPoints, vector<Point3d> originalPoints, 
+                                 double Ia, double Ip, double kd, double ks, int n, 
+                                 Point3d lightSource, Point2d center) { 
+    img.setTo(Scalar(0, 0, 0));
+    vector<vector<int>> faces = {
+        {0, 1, 2, 3}, // Нижняя грань
+        {7, 6, 5, 4}, // Верхняя грань
+        {4, 5, 1, 0}, // Передняя грань
+        {5, 6, 2, 1}, // Правая грань
+        {6, 7, 3, 2}, // Задняя грань
+        {7, 4, 0, 3}  // Левая грань
+    };
+
+    Point3d viewDir(0, 0, -1);
+
+    for (const auto& face : faces) {
+        Point3d normal = getNormal(
+            originalPoints[face[0]],
+            originalPoints[face[1]],
+            originalPoints[face[2]]
+        );
+
+
+        if (!isFrontFace(normal, viewDir)) {
+            continue;
+        }
+
+        vector<double> I(face.size()); 
+        for (int i = 0; i < face.size(); ++i) {
+            I[i] = getVertexFongIntensity(Ia, Ip, kd, ks, n, lightSource, viewDir, originalPoints[face[i]], originalPoints, faces);
+        }
+        vector<Point2d> facePoints = {newPoints[face[1]], newPoints[face[2]], newPoints[face[3]], newPoints[face[4]]};
+        for (int i = 0; i < facePoints.size(); ++i) {
+            fillProjectedFace(img, facePoints, I, center);
+        }
+        // for (int i = 0; i < face.size(); ++i) {
+        //     drawLine(img, newPoints[face[i]], newPoints[face[(i + 1) % face.size()]], center);
+        // }
     }
 }
 
@@ -320,25 +449,7 @@ void getParallelProjection(Mat& img, vector<Point3d> points) {
         center.y += newPoints[i].y;
     }
     center = Point2d(int(round(center.x / newPoints.size())), int(round(center.y / newPoints.size())));
-    drawCubeParallel(img, newPoints, points, center);
-    // return newPoints;
-}
-
-void getParallelProjectionGouraud(Mat& img, vector<Point3d> points) {
-    vector<Point2d> newPoints;
-    int n = points.size();
-    for (int i = 0; i < n; ++i) {
-        Point2d newPoint = transformParallel(points[i]);
-        newPoints.push_back(newPoint);
-    }
-    Point2d center(0, 0);
-    for (int i = 0; i < newPoints.size(); ++i) {
-        center.x += newPoints[i].x;
-        center.y += newPoints[i].y;
-    }
-    center = Point2d(int(round(center.x / newPoints.size())), int(round(center.y / newPoints.size())));
-    drawCubeGouraud(img, points, Point3d(0, 0, -1), center);
-    // return newPoints;
+    drawCubeParallelWithShading(img, newPoints, points, 0.2, 0.8, 0.3, 0.5, 50, Point3d(0, 1000, 1000), center);
 }
 
 void animatePerspective(Mat& img, vector<Point3d> points, Point3d normal, int numFrames, int k) {
@@ -367,21 +478,8 @@ void animateParallel(Mat& img, vector<Point3d> points, Point3d normal, int numFr
     }
 }
 
-void animateGouraud(Mat& img, vector<Point3d> points, Point3d normal, int numFrames) {
-    double norm = sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
-    normal.x = int(round(double(normal.x) / norm));
-    normal.y = int(round(double(normal.y) / norm));
-    normal.z = int(round(double(normal.z) / norm));
-    for (int i = 0; i < numFrames; ++i) {
-        getParallelProjectionGouraud(img, points);
-        string fileName = "../frames/frame" + to_string(i) + ".jpg";
-        imwrite(fileName, img);
-        points = makeRotation(points, normal, 6);
-    }
-}
-
 int main() {
-    Mat img(1440, 2560, CV_8UC3, Scalar(255, 255, 255));
+    Mat img(1000, 1000, CV_8UC3, Scalar(0, 0, 0));
 
     int n;
     cin >> n;
@@ -395,8 +493,8 @@ int main() {
     
     Point3d normal(1, 0, 0);
     // animatePerspective(img, points, normal, 120, 400);
-    // animateParallel(img, points, normal, 120);
-    animateGouraud(img, points, normal, 120);
-    
+    //animateParallel(img, points, normal, 120);
+
+    animateParallel(img, points, Point3d(1, 1, 1), 100);
     return 0;
 }
